@@ -31,8 +31,8 @@
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          外部集成层 (Integration Layer)                  │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
-│  │  抖音开放API │  │  TTS 服务   │  │  视频处理   │  │  对象存储   │    │
-│  │             │  │ (Azure/阿里) │  │ (FFmpeg)   │  │ (OSS/S3)   │    │
+│  │  抖音开放API │  │ Seedance 2.0│  │  TTS 服务   │  │  对象存储   │    │
+│  │             │  │  (AI视频生成) │  │ (Azure/阿里) │  │ (OSS/S3)   │    │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -45,7 +45,7 @@
 |------|------|------------|
 | **TaskManager** | 任务调度、队列管理 | `TaskScheduler`, `TaskQueue`, `RetryHandler` |
 | **ContentProcessor** | 文本处理、内容清洗 | `TextCleaner`, `KeywordExtractor`, `ContentAnalyzer` |
-| **VideoGenerator** | 视频生成、渲染 | `VideoGenerator`, `TextRenderer`, `SubtitleGenerator` |
+| **VideoGenerator (Seedance)** | 调用 Seedance 2.0 生成视频 | `SeedanceClient`, `VideoGenerator`, `TaskSubmitter` |
 | **AudioProcessor** | 音频处理、TTS | `TTSEngine`, `AudioMixer`, `BackgroundMusic` |
 | **DouyinAPI** | 抖音开放平台对接 | `DouyinClient`, `AuthManager`, `VideoUploader` |
 | **StorageManager** | 文件存储管理 | `LocalStorage`, `OSSStorage`, `CacheManager` |
@@ -63,22 +63,22 @@
     │
     ▼
 ┌─────────────────┐
-│  AudioProcessor │ ───► TTS 转换 / 音频处理
+│  AudioProcessor │ ───► TTS 转换 / 音频处理 (可选)
+└─────────────────┘
+    │
+    ▼
+┌─────────────────────────────┐
+│  VideoGenerator (Seedance)  │ ───► 调用 Seedance 2.0 API 生成视频
+└─────────────────────────────┘
+    │
+    ▼
+┌─────────────────┐
+│  StorageManager │ ───► 下载视频到本地 / 上传到 OSS
 └─────────────────┘
     │
     ▼
 ┌─────────────────┐
-│ VideoGenerator  │ ───► 文字转图片 / 合成视频
-└─────────────────┘
-    │
-    ▼
-┌─────────────────┐
-│  StorageManager │ ───► 上传到 OSS (可选)
-└─────────────────┘
-    │
-    ▼
-┌─────────────────┐
-│   DouyinAPI    │ ───► 上传视频 / 发布
+│   DouyinAPI    │ ───► 上传视频 / 发布到抖音
 └─────────────────┘
     │
     ▼
@@ -90,9 +90,86 @@
 └─────────────────┘
 ```
 
-## 3. API 设计
+## 3. Seedance 2.0 集成设计
 
-### 3.1 REST API 端点
+### 3.1 Seedance 2.0 简介
+
+**Seedance (即梦)** 是字节跳动推出的 AI 视频生成工具，提供 API 接口支持：
+- 文本到视频生成
+- 图片到视频生成
+- 视频编辑功能
+
+### 3.2 Seedance API 集成
+
+```python
+class SeedanceClient:
+    """Seedance 2.0 API 客户端"""
+    
+    def __init__(self, api_key: str, base_url: str = "https://api.seedance.com/v1"):
+        self.api_key = api_key
+        self.base_url = base_url
+    
+    def create_video(self, prompt: str, **options) -> dict:
+        """
+        创建视频任务
+        
+        Args:
+            prompt: 视频描述文本
+            options: 其他参数 (duration, aspect_ratio, etc.)
+            
+        Returns:
+            任务信息 {task_id, status}
+        """
+        pass
+    
+    def get_task_status(self, task_id: str) -> dict:
+        """
+        获取任务状态
+        
+        Args:
+            task_id: 任务 ID
+            
+        Returns:
+            任务状态 {status, video_url, etc.}
+        """
+        pass
+    
+    def download_video(self, video_url: str, output_path: str) -> str:
+        """
+        下载视频
+        
+        Args:
+            video_url: 视频 URL
+            output_path: 保存路径
+            
+        Returns:
+            本地文件路径
+        """
+        pass
+```
+
+### 3.3 Seedance 配置
+
+```yaml
+seedance:
+  # API 配置
+  api_key: "your_seedance_api_key"
+  base_url: "https://api.seedance.com/v1"
+  
+  # 视频生成参数
+  default_duration: 5        # 默认视频时长(秒)
+  default_aspect: "9:16"     # 默认宽高比 (9:16 竖屏 / 16:9 横屏)
+  default_model: "seedance-pro"  # 模型版本
+  
+  # 任务配置
+  poll_interval: 3           # 轮询间隔(秒)
+  max_wait_time: 300         # 最大等待时间(秒)
+  timeout: 600               # 生成超时(秒)
+```
+
+## 4. API 设计
+
+### 4.1 REST API 端点
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
@@ -106,7 +183,7 @@
 | GET | `/api/v1/videos` | 获取视频列表 |
 | POST | `/api/v1/upload` | 上传视频文件 |
 
-### 3.2 Webhook 事件
+### 4.2 Webhook 事件
 
 | 事件 | 描述 |
 |------|------|
@@ -116,56 +193,40 @@
 | `video.published` | 视频发布成功 |
 | `douyin.auth_success` | 抖音授权成功 |
 
-## 4. 数据模型设计
+## 5. 数据模型设计
 
-### 4.1 Task (任务)
+### 5.1 Task (任务)
 
 ```python
 class Task:
     id: str                      # 任务 ID
-    content: str                 # 文本内容
+    content: str                 # 文本内容 (用于生成视频)
     title: str                   # 视频标题
     description: str             # 视频描述
     status: TaskStatus           # 任务状态 (pending/running/completed/failed)
-    video_path: str              # 生成视频路径
+    
+    # 视频生成相关
+    seedance_task_id: str        # Seedance 任务 ID
+    video_path: str              # 生成视频本地路径
+    video_url: str               # 视频 OSS URL
+    
+    # 抖音相关
     douyin_video_id: str         # 抖音视频 ID
+    douyin_video_url: str        # 抖音视频链接
+    
+    # 时间戳
     created_at: datetime         # 创建时间
     scheduled_at: datetime       # 定时发布时间
     completed_at: datetime       # 完成时间
+    
+    # 错误处理
     error_message: str           # 错误信息
     retry_count: int             # 重试次数
 ```
 
-### 4.2 Config (配置)
+## 6. 部署架构
 
-```python
-class Config:
-    # 抖音配置
-    douyin_app_id: str
-    douyin_app_secret: str
-    douyin_access_token: str
-    douyin_refresh_token: str
-    
-    # 视频配置
-    video_width: int = 720
-    video_height: int = 1280
-    video_fps: int = 30
-    video_duration: int = 60
-    
-    # TTS 配置
-    tts_provider: str            # azure / aliyun / baidu
-    tts_voice: str
-    tts_speed: int
-    
-    # 存储配置
-    storage_type: str            # local / oss
-    oss_endpoint: str
-    oss_bucket: str
-```
-
-## 5. 部署架构
-
-### 5.1 开发/测试环境
+### 6.1 开发/测试环境
 
 ```
 ┌─────────────────────────────────────────┐
@@ -178,7 +239,7 @@ class Config:
 └─────────────────────────────────────────┘
 ```
 
-### 5.2 生产环境 (推荐)
+### 6.2 生产环境 (推荐)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -210,7 +271,7 @@ class Config:
                 └───────────────────────────┘
 ```
 
-## 6. 技术选型
+## 7. 技术选型
 
 | 类别 | 技术 | 理由 |
 |------|------|------|
@@ -218,26 +279,27 @@ class Config:
 | **任务队列** | Celery + Redis | 分布式任务处理、支持定时任务 |
 | **数据库** | PostgreSQL | 可靠性高、支持复杂查询 |
 | **缓存** | Redis | 高性能、支持多种数据结构 |
-| **视频处理** | FFmpeg + MoviePy | 强大、社区成熟 |
+| **视频生成** | Seedance 2.0 (即梦) | 字节跳动 AI 视频生成工具 |
 | **TTS** | Azure TTS / 阿里云 | 效果好、支持多种声音 |
 | **存储** | 阿里云 OSS | 国内访问快、费用低 |
 
-## 7. 安全性设计
+## 8. 安全性设计
 
 1. **API 认证** - Token 鉴权 + API Key
-2. **敏感信息** - 加密存储 (抖音 App Secret)
+2. **敏感信息** - 加密存储 (抖音 App Secret, Seedance API Key)
 3. **请求限流** - 防止 API 滥用
 4. **抖音 API 调用** - 遵循官方频率限制
-5. **视频文件** - 上传前病毒扫描
+5. **Seedance API 调用** - 遵循官方频率限制
 
-## 8. 扩展性设计
+## 9. 扩展性设计
 
-1. **插件化** - TTS/视频生成器可插拔
-2. **多平台** - 预留快手、视频号接口
+1. **插件化** - 视频生成器可插拔 (Seedance / Runway / Pika)
+2. **多平台** - 预留快手、视频号、小红书接口
 3. **分布式** - 支持多节点部署
 4. **监控** - Prometheus + Grafana 指标
 
 ---
 
-*文档版本: 1.0*
+*文档版本: 1.1*
 *最后更新: 2026-02-28*
+*更新内容: 新增 Seedance 2.0 视频生成集成设计*
