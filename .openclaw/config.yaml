@@ -1,0 +1,46 @@
+# OpenClaw 配置
+name: douyin-agent
+description: 抖音视频发布自动化智能体
+version: 1.0.0
+
+# 触发关键词
+triggers:
+  - douyin
+  - 抖音
+  - 视频发布
+  - /create
+  - /publish
+
+# 命令
+commands:
+  - name: create
+    description: 创建视频任务
+    pattern: "/create|帮我.*视频|做个.*视频"
+    
+  - name: status
+    description: 查看任务状态
+    pattern: "/status|任务状态"
+    
+  - name: list
+    description: 列出任务
+    pattern: "/list|任务列表"
+
+# 子智能体配置 (可选 - 如果使用 OpenClaw 的 sub-agents)
+sub_agents:
+  content:
+    prompt_file: prompts/content.md
+  animation:
+    prompt_file: prompts/animation.md
+  video:
+    prompt_file: prompts/video.md
+  publish:
+    prompt_file: prompts/publish.md
+
+# 工作目录
+workdir: /Volumes/macmini_disk/ClaudeCode/douyin_agent
+
+# 执行命令
+exec:
+  create_video: "python3 main.py -t '{text}' --title '{title}'"
+  list_tasks: "python3 main.py --list"
+  task_status: "python3 main.py --status {task_id}"
