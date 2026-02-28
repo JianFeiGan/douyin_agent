@@ -1,305 +1,352 @@
-# 抖音视频发布自动化智能体 - 系统架构设计
+# 抖音视频发布自动化智能体 - 基于 OpenClaw 多智能体架构设计
 
-## 1. 系统总体架构
+## 1. 设计理念
+
+### 1.1 核心思想
+
+**以 OpenClaw 为核心调度系统，Claude Code 作为编程助手，多智能体协同完成自动化任务。**
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           用户层 (User Layer)                            │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
-│  │   Web UI   │  │   REST API │  │  Scheduler  │  │  Webhook    │    │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘    │
+│                           OpenClaw (主控 Agent)                          │
+│                    所有任务的入口、调度器和协调者                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+          ┌─────────────────────────┼─────────────────────────┐
+          ▼                         ▼                         ▼
+┌───────────────────┐   ┌───────────────────┐   ┌───────────────────┐
+│  内容理解 Agent   │   │  视频生成 Agent   │   │  发布 Agent       │
+│  - 分析文本      │   │  - 调用 Seedance │   │  - 抖音 API 对接  │
+│  - 提取关键信息  │   │  - 监控生成状态   │   │  - 视频上传      │
+└───────────────────┘   └───────────────────┘   └───────────────────┘
+          │                         │                         │
+          └─────────────────────────┼─────────────────────────┘
+                                    ▼
+                    ┌───────────────────────────┐
+                    │   Claude Code (编程助手)   │
+                    │   - 开发新功能脚本          │
+                    │   - 调试和问题排查          │
+                    │   - 代码优化                │
+                    └───────────────────────────┘
+```
+
+### 1.2 OpenClaw 能力
+
+| 能力 | 说明 |
+|------|------|
+| **多会话管理** | 同时管理多个任务会话 |
+| **子智能体** | spawn sub-agents 并行处理任务 |
+| **消息路由** | 支持多种渠道 (Feishu, Discord, etc.) |
+| **心跳检测** | 定时检查任务状态 |
+| **文件系统** | 读写本地文件 |
+| **执行命令** | 运行 shell 命令 |
+| **浏览器控制** | 自动化 Web 操作 |
+
+## 2. 系统架构
+
+### 2.1 整体架构
+
+```
+                              用户 (Feishu/终端)
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         OpenClaw Gateway                                 │
+│                    (消息路由、认证、会话管理)                             │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                          服务层 (Service Layer)                          │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                      Task Scheduler (任务调度)                    │   │
-│  │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐         │   │
-│  │  │ 定时发布  │ │ 批量发布  │ │ 队列管理  │ │ 重试机制  │         │   │
-│  │  └───────────┘ └───────────┘ └───────────┘ └───────────┘         │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    Business Logic (业务逻辑)                      │   │
-│  │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐         │   │
-│  │  │  内容处理  │ │ 视频生成  │ │ 抖音发布  │ │  数据存储  │         │   │
-│  │  └───────────┘ └───────────┘ └───────────┘ └───────────┘         │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
+│                      OpenClaw Main Agent                                 │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                     任务理解与分解                               │    │
+│  │  1. 解析用户意图                                                │    │
+│  │  2. 拆分为子任务                                                │    │
+│  │  3. 分配给子 Agents                                             │    │
+│  │  4. 汇总结果                                                    │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          外部集成层 (Integration Layer)                  │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
-│  │  抖音开放API │  │ Seedance 2.0│  │  TTS 服务   │  │  对象存储   │    │
-│  │             │  │  (AI视频生成) │  │ (Azure/阿里) │  │ (OSS/S3)   │    │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘    │
-└─────────────────────────────────────────────────────────────────────────┘
+          │                       │                       │
+          ▼                       ▼                       ▼
+┌───────────────────┐   ┌───────────────────┐   ┌───────────────────┐
+│  Content Agent    │   │  Video Agent     │   │  Publish Agent    │
+│  (内容处理)        │   │  (视频生成)        │   │  (抖音发布)        │
+│                   │   │                   │   │                   │
+│ - 文本分析        │   │ - Seedance API   │   │ - 抖音开放平台    │
+│ - 关键词提取      │   │ - 任务状态监控    │   │ - 视频上传        │
+│ - 摘要生成        │   │ - 视频下载        │   │ - 发布管理        │
+└───────────────────┘   └───────────────────┘   └───────────────────┘
+          │                       │                       │
+          └───────────────────────┼───────────────────────┘
+                                  │
+                                  ▼
+                    ┌───────────────────────────┐
+                    │    Claude Code            │
+                    │    (编程助手)              │
+                    │                           │
+                    │  - 生成新脚本             │
+                    │  - 调试代码               │
+                    │  - 优化实现               │
+                    └───────────────────────────┘
 ```
 
-## 2. 核心模块设计
+### 2.2 智能体职责
 
-### 2.1 模块职责
+| 智能体 | 职责 | 工具/能力 |
+|--------|------|----------|
+| **Main Agent** | 任务协调、结果汇总 | message, sessions_spawn, memory |
+| **Content Agent** | 文本处理、内容理解 | 读取文件、分析文本、提取信息 |
+| **Video Agent** | 视频生成任务 | API 调用、状态轮询、文件下载 |
+| **Publish Agent** | 抖音发布 | API 调用、授权管理、上传发布 |
+| **Coding Agent** | 代码开发 | Claude Code CLI、代写脚本 |
 
-| 模块 | 职责 | 主要类/函数 |
-|------|------|------------|
-| **TaskManager** | 任务调度、队列管理 | `TaskScheduler`, `TaskQueue`, `RetryHandler` |
-| **ContentProcessor** | 文本处理、内容清洗 | `TextCleaner`, `KeywordExtractor`, `ContentAnalyzer` |
-| **VideoGenerator (Seedance)** | 调用 Seedance 2.0 生成视频 | `SeedanceClient`, `VideoGenerator`, `TaskSubmitter` |
-| **AudioProcessor** | 音频处理、TTS | `TTSEngine`, `AudioMixer`, `BackgroundMusic` |
-| **DouyinAPI** | 抖音开放平台对接 | `DouyinClient`, `AuthManager`, `VideoUploader` |
-| **StorageManager** | 文件存储管理 | `LocalStorage`, `OSSStorage`, `CacheManager` |
-| **DataStore** | 数据持久化 | `SQLiteDB`, `TaskRepository`, `LogRepository` |
+## 3. 任务流程
 
-### 2.2 数据流设计
+### 3.1 完整流程示例
 
 ```
-用户输入 (文本)
+用户: "帮我发布一个抖音视频，内容是关于AI技术的科普"
+
+Main Agent
     │
-    ▼
-┌─────────────────┐
-│  ContentProcessor │ ───► 关键词提取 / 内容分析
-└─────────────────┘
+    ├─► 1. 理解任务
+    │       "用户需要一个AI科普视频，需要生成并发布到抖音"
     │
-    ▼
-┌─────────────────┐
-│  AudioProcessor │ ───► TTS 转换 / 音频处理 (可选)
-└─────────────────┘
+    ├─► 2. 启动 Content Agent
+    │       "分析这段文本，提取关键信息：{text}"
+    │   
+    │   ← Content Agent 返回:
+    │       - 关键词: AI, 技术, 科普
+    │       - 时长建议: 30秒
+    │       - 风格: 科技感
     │
-    ▼
-┌─────────────────────────────┐
-│  VideoGenerator (Seedance)  │ ───► 调用 Seedance 2.0 API 生成视频
-└─────────────────────────────┘
+    ├─► 3. 启动 Video Agent
+    │       "调用 Seedance 生成视频: {prompt}"
     │
-    ▼
-┌─────────────────┐
-│  StorageManager │ ───► 下载视频到本地 / 上传到 OSS
-└─────────────────┘
+    │   ← Video Agent 返回:
+    │       - 任务ID: sd_xxx
+    │       - 状态: completed
+    │       - 视频路径: ./videos/xxx.mp4
     │
-    ▼
-┌─────────────────┐
-│   DouyinAPI    │ ───► 上传视频 / 发布到抖音
-└─────────────────┘
+    ├─► 4. 启动 Publish Agent
+    │       "发布视频到抖音: {video_path}, {title}"
     │
-    ▼
-   抖音发布成功
+    │   ← Publish Agent 返回:
+    │       - 抖音视频ID: 738xxx
+    │       - 视频链接: https://douyin.com/video/738xxx
     │
-    ▼
-┌─────────────────┐
-│   DataStore    │ ───► 记录任务状态 / 日志
-└─────────────────┘
+    └─► 5. 汇总结果
+            "✅ 视频发布成功！\n链接: https://douyin.com/video/738xxx"
 ```
 
-## 3. Seedance 2.0 集成设计
+### 3.2 多任务并行
 
-### 3.1 Seedance 2.0 简介
+```
+用户: "帮我生成3个不同主题的视频"
 
-**Seedance (即梦)** 是字节跳动推出的 AI 视频生成工具，提供 API 接口支持：
-- 文本到视频生成
-- 图片到视频生成
-- 视频编辑功能
-
-### 3.2 Seedance API 集成
-
-```python
-class SeedanceClient:
-    """Seedance 2.0 API 客户端"""
-    
-    def __init__(self, api_key: str, base_url: str = "https://api.seedance.com/v1"):
-        self.api_key = api_key
-        self.base_url = base_url
-    
-    def create_video(self, prompt: str, **options) -> dict:
-        """
-        创建视频任务
-        
-        Args:
-            prompt: 视频描述文本
-            options: 其他参数 (duration, aspect_ratio, etc.)
-            
-        Returns:
-            任务信息 {task_id, status}
-        """
-        pass
-    
-    def get_task_status(self, task_id: str) -> dict:
-        """
-        获取任务状态
-        
-        Args:
-            task_id: 任务 ID
-            
-        Returns:
-            任务状态 {status, video_url, etc.}
-        """
-        pass
-    
-    def download_video(self, video_url: str, output_path: str) -> str:
-        """
-        下载视频
-        
-        Args:
-            video_url: 视频 URL
-            output_path: 保存路径
-            
-        Returns:
-            本地文件路径
-        """
-        pass
+Main Agent
+    │
+    ├─► Spawn Video Agent 1 (主题: 美食)
+    ├─► Spawn Video Agent 2 (主题: 旅游)  
+    ├─► Spawn Video Agent 3 (主题: 科技)
+    │
+    ├─► 等待所有 Agent 完成
+    │
+    └─► 汇总结果
+        "✅ 3个视频全部生成完成！"
 ```
 
-### 3.3 Seedance 配置
+## 4. 技术实现
+
+### 4.1 OpenClaw 配置
 
 ```yaml
-seedance:
-  # API 配置
-  api_key: "your_seedance_api_key"
-  base_url: "https://api.seedance.com/v1"
+# openclaw.yaml
+agents:
+  main:
+    role: coordinator
+    capabilities:
+      - message
+      - sessions_spawn
+      - memory
   
-  # 视频生成参数
-  default_duration: 5        # 默认视频时长(秒)
-  default_aspect: "9:16"     # 默认宽高比 (9:16 竖屏 / 16:9 横屏)
-  default_model: "seedance-pro"  # 模型版本
+  content:
+    role: subagent
+    prompt: "你是一个内容分析专家..."
   
-  # 任务配置
-  poll_interval: 3           # 轮询间隔(秒)
-  max_wait_time: 300         # 最大等待时间(秒)
-  timeout: 600               # 生成超时(秒)
+  video:
+    role: subagent
+    prompt: "你负责调用 Seedance API 生成视频..."
+  
+  publish:
+    role: subagent
+    prompt: "你负责发布视频到抖音..."
+
+channels:
+  - feishu
+  - terminal
 ```
 
-## 4. API 设计
-
-### 4.1 REST API 端点
-
-| 方法 | 路径 | 描述 |
-|------|------|------|
-| POST | `/api/v1/tasks` | 创建发布任务 |
-| GET | `/api/v1/tasks` | 获取任务列表 |
-| GET | `/api/v1/tasks/{id}` | 获取任务详情 |
-| DELETE | `/api/v1/tasks/{id}` | 删除任务 |
-| POST | `/api/v1/tasks/{id}/execute` | 执行任务 |
-| POST | `/api/v1/auth/url` | 获取抖音授权 URL |
-| POST | `/api/v1/auth/callback` | 抖音授权回调 |
-| GET | `/api/v1/videos` | 获取视频列表 |
-| POST | `/api/v1/upload` | 上传视频文件 |
-
-### 4.2 Webhook 事件
-
-| 事件 | 描述 |
-|------|------|
-| `task.started` | 任务开始 |
-| `task.completed` | 任务完成 |
-| `task.failed` | 任务失败 |
-| `video.published` | 视频发布成功 |
-| `douyin.auth_success` | 抖音授权成功 |
-
-## 5. 数据模型设计
-
-### 5.1 Task (任务)
+### 4.2 子智能体调用
 
 ```python
-class Task:
-    id: str                      # 任务 ID
-    content: str                 # 文本内容 (用于生成视频)
-    title: str                   # 视频标题
-    description: str             # 视频描述
-    status: TaskStatus           # 任务状态 (pending/running/completed/failed)
-    
-    # 视频生成相关
-    seedance_task_id: str        # Seedance 任务 ID
-    video_path: str              # 生成视频本地路径
-    video_url: str               # 视频 OSS URL
-    
-    # 抖音相关
-    douyin_video_id: str         # 抖音视频 ID
-    douyin_video_url: str        # 抖音视频链接
-    
-    # 时间戳
-    created_at: datetime         # 创建时间
-    scheduled_at: datetime       # 定时发布时间
-    completed_at: datetime       # 完成时间
-    
-    # 错误处理
-    error_message: str           # 错误信息
-    retry_count: int             # 重试次数
+# Main Agent 中调用子智能体
+from sessions_spawn import sessions_spawn
+
+# 启动内容分析子任务
+content_result = sessions_spawn(
+    task="分析以下文本: {user_text}",
+    label="content-agent",
+    runtime="subagent"
+)
+
+# 启动视频生成子任务
+video_result = sessions_spawn(
+    task="调用 Seedance API 生成视频: {prompt}",
+    label="video-agent", 
+    runtime="subagent"
+)
 ```
 
-## 6. 部署架构
+### 4.3 Claude Code 集成
 
-### 6.1 开发/测试环境
+```bash
+# 开发新功能脚本
+claude -p "创建一个调用 Seedance API 的 Python 脚本..."
 
-```
-┌─────────────────────────────────────────┐
-│           Docker Compose                 │
-│  ┌─────────────────────────────────┐    │
-│  │        douyin-agent (Python)    │    │
-│  │  - FastAPI + Uvicorn            │    │
-│  │  - SQLite (内嵌)                │    │
-│  └─────────────────────────────────┘    │
-└─────────────────────────────────────────┘
+# 调试问题
+claude -p "帮我调试这个错误: {error_log}"
+
+# 代码优化
+claude -p "优化这段代码的性能: {code}"
 ```
 
-### 6.2 生产环境 (推荐)
+## 5. 消息/指令格式
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         Load Balancer                        │
-│                      (Nginx / ALB)                          │
-└─────────────────────────────────────────────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        ▼                     ▼                     ▼
-┌───────────────┐      ┌───────────────┐      ┌───────────────┐
-│  douyin-agent │      │  douyin-agent │      │  douyin-agent │
-│    (Node 1)   │      │    (Node 2)   │      │    (Node 3)   │
-└───────────────┘      └───────────────┘      └───────────────┘
-        │                     │                     │
-        └─────────────────────┼─────────────────────┘
-                              ▼
-                ┌───────────────────────────┐
-                │      Redis (队列/缓存)     │
-                └───────────────────────────┘
-                              │
-                              ▼
-                ┌───────────────────────────┐
-                │   PostgreSQL (数据库)     │
-                └───────────────────────────┘
-                              │
-                              ▼
-                ┌───────────────────────────┐
-                │    OSS (视频存储)         │
-                └───────────────────────────┘
-```
+### 5.1 用户指令
 
-## 7. 技术选型
-
-| 类别 | 技术 | 理由 |
+| 指令 | 说明 | 示例 |
 |------|------|------|
-| **Web 框架** | FastAPI | 异步高性能、自动生成 API 文档 |
-| **任务队列** | Celery + Redis | 分布式任务处理、支持定时任务 |
-| **数据库** | PostgreSQL | 可靠性高、支持复杂查询 |
-| **缓存** | Redis | 高性能、支持多种数据结构 |
-| **视频生成** | Seedance 2.0 (即梦) | 字节跳动 AI 视频生成工具 |
-| **TTS** | Azure TTS / 阿里云 | 效果好、支持多种声音 |
-| **存储** | 阿里云 OSS | 国内访问快、费用低 |
+| `/create` | 创建视频任务 | `/create 帮我做一个AI科普视频` |
+| `/publish` | 发布到抖音 | `/publish video.mp4` |
+| `/status` | 查看任务状态 | `/status task_123` |
+| `/list` | 列出所有任务 | `/list` |
+| `/help` | 帮助信息 | `/help` |
 
-## 8. 安全性设计
+### 5.2 任务状态
 
-1. **API 认证** - Token 鉴权 + API Key
-2. **敏感信息** - 加密存储 (抖音 App Secret, Seedance API Key)
-3. **请求限流** - 防止 API 滥用
-4. **抖音 API 调用** - 遵循官方频率限制
-5. **Seedance API 调用** - 遵循官方频率限制
+| 状态 | 说明 |
+|------|------|
+| pending | 等待处理 |
+| analyzing | 内容分析中 |
+| generating | 视频生成中 |
+| uploading | 上传抖音中 |
+| published | 发布成功 |
+| failed | 失败 |
 
-## 9. 扩展性设计
+## 6. 存储设计
 
-1. **插件化** - 视频生成器可插拔 (Seedance / Runway / Pika)
-2. **多平台** - 预留快手、视频号、小红书接口
-3. **分布式** - 支持多节点部署
-4. **监控** - Prometheus + Grafana 指标
+### 6.1 本地存储结构
+
+```
+douyin_agent/
+├── .openclaw/              # OpenClaw 配置
+│   └── config.yaml
+├── tasks/                  # 任务记录
+│   └── YYYY-MM-DD/
+│       └── task_xxx.json
+├── videos/                 # 生成的视频
+│   └── task_xxx.mp4
+├── scripts/                # Claude Code 生成的脚本
+│   ├── seedance_api.py
+│   ├── douyin_api.py
+│   └── utils/
+└── logs/                   # 日志
+    └── douyin_agent.log
+```
+
+### 6.2 任务数据
+
+```json
+{
+  "id": "task_20260228_001",
+  "user_input": "帮我做一个AI科普视频",
+  "status": "published",
+  "content_analysis": {
+    "keywords": ["AI", "技术", "科普"],
+    "style": "科技感"
+  },
+  "video": {
+    "seedance_task_id": "sd_xxx",
+    "local_path": "videos/task_xxx.mp4"
+  },
+  "douyin": {
+    "video_id": "738xxx",
+    "video_url": "https://douyin.com/video/738xxx"
+  },
+  "created_at": "2026-02-28T21:40:00Z"
+}
+```
+
+## 7. 部署方式
+
+### 7.1 开发模式
+
+```
+OpenClaw (本地运行)
+    │
+    └── Gateway: localhost:8080
+            │
+            └── Main Agent (当前会话)
+                    │
+                    ├── Content Agent (sub-agent)
+                    ├── Video Agent (sub-agent)
+                    └── Publish Agent (sub-agent)
+```
+
+### 7.2 生产模式
+
+```
+                           用户 (Feishu/Telegram)
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────┐
+│                    OpenClaw Gateway                     │
+│                   (云服务器/Docker)                       │
+└─────────────────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┼───────────────┐
+                    ▼               ▼               ▼
+            ┌───────────┐   ┌───────────┐   ┌───────────┐
+            │ Main Agent│   │Main Agent │   │Main Agent │
+            │  (Node 1) │   │ (Node 2)  │   │ (Node 3)  │
+            └───────────┘   └───────────┘   └───────────┘
+```
+
+## 8. 扩展性
+
+### 8.1 新增智能体
+
+```python
+# 扩展新的 Agent
+@agent(name="music")
+class MusicAgent:
+    """音乐生成 Agent"""
+    
+    def run(self, task):
+        # 调用音乐生成 API
+        pass
+```
+
+### 8.2 新增平台
+
+- 小红书发布 Agent
+- 快手发布 Agent
+- B站发布 Agent
+- YouTube 发布 Agent
 
 ---
 
-*文档版本: 1.1*
+*文档版本: 2.0*
 *最后更新: 2026-02-28*
-*更新内容: 新增 Seedance 2.0 视频生成集成设计*
+*设计理念: 基于 OpenClaw 多智能体架构 + Claude Code 编程助手*
