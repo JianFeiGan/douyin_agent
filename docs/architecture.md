@@ -12,15 +12,16 @@
 │                    所有任务的入口、调度器和协调者                         │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
-          ┌─────────────────────────┼─────────────────────────┐
-          ▼                         ▼                         ▼
-┌───────────────────┐   ┌───────────────────┐   ┌───────────────────┐
-│  内容理解 Agent   │   │  视频生成 Agent   │   │  发布 Agent       │
-│  - 分析文本      │   │  - 调用 Seedance │   │  - 抖音 API 对接  │
-│  - 提取关键信息  │   │  - 监控生成状态   │   │  - 视频上传      │
-└───────────────────┘   └───────────────────┘   └───────────────────┘
-          │                         │                         │
-          └─────────────────────────┼─────────────────────────┘
+          ┌─────────────────────────┼─────────────────────────┼─────────────────────────┐
+          ▼                         ▼                         ▼                         ▼
+┌───────────────────┐   ┌───────────────────┐   ┌───────────────────┐   ┌───────────────────┐
+│  内容理解 Agent   │   │  动画优化 Agent   │   │  视频生成 Agent   │   │  发布 Agent       │
+│  - 分析文本      │   │  - 动画创作       │   │  - 调用 Seedance │   │  - 抖音 API 对接  │
+│  - 提取关键信息  │   │  - 场景设计       │   │  - 监控生成状态   │   │  - 视频上传      │
+│  - 生成视频 prompt│   │  - 动作编排      │   │  - 视频下载       │   │  - 发布管理      │
+└───────────────────┘   └───────────────────┘   └───────────────────┘   └───────────────────┘
+          │                         │                         │                         │
+          └─────────────────────────┼─────────────────────────┼─────────────────────────┘
                                     ▼
                     ┌───────────────────────────┐
                     │   Claude Code (编程助手)   │
@@ -97,6 +98,7 @@
 | **Main Agent** | 任务协调、结果汇总 | message, sessions_spawn, memory |
 | **Content Agent** | 文本处理、内容理解 | 读取文件、分析文本、提取信息 |
 | **Video Agent** | 视频生成任务 | API 调用、状态轮询、文件下载 |
+| **Animation Agent** | 动画创作优化 | 场景设计、动作编排、动画 prompt 优化 |
 | **Publish Agent** | 抖音发布 | API 调用、授权管理、上传发布 |
 | **Coding Agent** | 代码开发 | Claude Code CLI、代写脚本 |
 
@@ -125,8 +127,9 @@
 ### 步骤 2: 任务分解
 将任务分解为：
 1. Content Agent - 内容分析与准备
-2. Video Agent - 调用 Seedance 生成视频
-3. Publish Agent - 发布到抖音
+2. Animation Agent - 动画创作优化
+3. Video Agent - 调用 Seedance 生成视频
+4. Publish Agent - 发布到抖音
 
 ### 步骤 3: 执行调度
 - 按顺序调用各个子 Agent
@@ -195,7 +198,65 @@
 ```
 ```
 
-### 3.3 Video Agent Prompt
+
+### 3.3 Animation Agent Prompt
+
+```
+# 角色：动画创作专家
+
+## 背景
+你是一个动画创作专家，负责将文本内容转化为适合动画视频的描述。你的专长是将抽象的概念转化为生动的动画场景。
+
+## 输入
+- content: 原始文本内容
+- keywords: 关键词列表
+- style: 视频风格
+
+## 输出要求
+
+请根据输入内容，生成以下信息：
+
+### 1. 场景设计 (Scenes)
+将内容分解为 3-5 个连续的场景：
+- 场景 1: [场景描述]
+- 场景 2: [场景描述]
+- ...
+
+### 2. 动作编排 (Actions)
+每个场景的主要动作：
+- 场景 1 动作: [具体动作描述]
+- 场景 2 动作: [具体动作描述]
+- ...
+
+### 3. 视觉风格 (Visual Style)
+- 色调: [冷色调/暖色调/等]
+- 元素: [具体视觉元素]
+- 特效: [需要添加的特效]
+
+### 4. 优化的 Seedance Prompt
+将以上内容整合为适合 Seedance 的英文描述：
+- 50-200 字符
+- 包含场景、动作、风格
+- 使用逗号分隔的描述性短语
+
+## 输出格式 (JSON)
+```json
+{
+  "scenes": [
+    {"description": "A futuristic tech laboratory", "action": "scientists working on holographic displays"},
+    {"description": "Neural network visualization", "action": "animated data flows connecting nodes"}
+  ],
+  "visual_style": {
+    "color": "blue and cyan tones",
+    "elements": "holographic displays, neural networks, futuristic equipment",
+    "effects": "glow effects, smooth transitions"
+  },
+  "seedance_prompt": "futuristic tech laboratory with holographic displays, scientists working on advanced computers, neural network visualization, blue and cyan tones, glow effects, 9:16 vertical video, smooth animations"
+}
+```
+```
+
+### 3.4 Video Agent Prompt
 
 ```
 # 角色：视频生成专家
@@ -260,7 +321,7 @@ GET {video_url}
 ```
 ```
 
-### 3.4 Publish Agent Prompt
+### 3.5 Publish Agent Prompt
 
 ```
 # 角色：抖音发布专家
@@ -332,10 +393,17 @@ Main Agent
     │   
     │   ← Content Agent 返回:
     │       - keywords: ["AI", "技术", "科普"]
-    │       - seedance_prompt: "A futuristic tech laboratory..."
-    │       - title: "AI 改变未来"
+    │       - content_summary: "..."
     │
-    ├─► 3. 启动 Video Agent
+    ├─► 3. 启动 Animation Agent
+    │       "将内容转化为动画描述：{content}"
+    │   
+    │   ← Animation Agent 返回:
+    │       - scenes: [场景1, 场景2, ...]
+    │       - visual_style: {色调, 元素, 特效}
+    │       - seedance_prompt: "A futuristic tech laboratory..."
+    │
+    ├─► 4. 启动 Video Agent
     │       "调用 Seedance 生成视频: {prompt}"
     │
     │   ← Video Agent 返回:
@@ -343,7 +411,7 @@ Main Agent
     │       - status: completed
     │       - video_path: ./videos/xxx.mp4
     │
-    ├─► 4. 启动 Publish Agent
+    ├─► 5. 启动 Publish Agent
     │       "发布视频到抖音: {video_path}, {title}"
     │
     │   ← Publish Agent 返回:
